@@ -14,7 +14,7 @@ import os
 import tempfile
 import unittest
 
-from memory_backend import MemoryStore, FactNotFoundError
+from ctrl_memory.backend import MemoryStore, FactNotFoundError
 
 
 class TestMemoryStore(unittest.TestCase):

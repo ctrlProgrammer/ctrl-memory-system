@@ -19,7 +19,7 @@ import struct
 import tempfile
 import unittest
 
-from memory_backend import (
+from ctrl_memory.backend import (
     EmbeddingEngine,
     SQLiteStore,
     _pack_embedding,

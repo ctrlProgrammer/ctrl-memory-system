@@ -17,10 +17,13 @@ Repository = "https://github.com/ctrl-alt-dev/ctrl-memory"
 Issues = "https://github.com/ctrl-alt-dev/ctrl-memory/issues"
 
 [project.scripts]
-ctrl-memory-mcp = "mcp_server:main"
+ctrl-memory-mcp = "ctrl_memory.server:main"
 
 [project.optional-dependencies]
 embeddings = ["sentence-transformers>=3.0.0"]
+
+[tool.setuptools.packages.find]
+include = ["ctrl_memory*", "hermes_provider*"]
 
 [tool.pytest]
 testpaths = ["tests"]

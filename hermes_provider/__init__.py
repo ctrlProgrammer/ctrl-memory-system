@@ -23,7 +23,7 @@ from agent.memory_provider import MemoryProvider
 # Attempt to import our backend from the ctrl-memory project.
 # Falls back to a bundled inline copy if import fails (plugin runs standalone).
 try:
-    from memory_backend import SQLiteStore, EmbeddingEngine, FactNotFoundError
+    from ctrl_memory.backend import SQLiteStore, EmbeddingEngine, FactNotFoundError
 except ImportError:
     # ── Inline minimal backend for standalone plugin deployment ──────
     import sqlite3

@@ -13,7 +13,7 @@ import tempfile
 import time
 import unittest
 
-from memory_backend import SQLiteStore, FactNotFoundError, create_store
+from ctrl_memory.backend import SQLiteStore, FactNotFoundError, create_store
 
 
 class TestSQLiteStore(unittest.TestCase):
@@ -237,7 +237,7 @@ class TestSQLiteStore(unittest.TestCase):
     def test_create_store_factory_json(self):
         """create_store('json') returns a MemoryStore."""
         store = create_store("json", storage_dir=tempfile.mkdtemp())
-        from memory_backend import MemoryStore
+        from ctrl_memory.backend import MemoryStore
         self.assertIsInstance(store, MemoryStore)
 
     def test_create_store_factory_sqlite(self):

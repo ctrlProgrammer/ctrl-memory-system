@@ -121,10 +121,10 @@ fi
 # Symlink the launcher
 mkdir -p "$BIN_DIR"
 LAUNCHER="$BIN_DIR/$APP_NAME-mcp"
-cat > "$LAUNCHER" << 'LAUNCHER_EOF'
+cat > "$LAUNCHER" << LAUNCHER_EOF
 #!/usr/bin/env bash
-exec "LAUNCHER_EOF"
-echo "$VENV_DIR/bin/$APP_NAME-mcp" >> "$LAUNCHER"
+exec "$VENV_DIR/bin/$APP_NAME-mcp" "\$@"
+LAUNCHER_EOF
 chmod +x "$LAUNCHER"
 
 # Verify
