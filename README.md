@@ -72,20 +72,44 @@ pipx install "ctrl-memory[embeddings]"
 ctrl-memory-mcp
 ```
 
-By default it uses JSON files in `~/.ctrl-memory/`. For SQLite:
+The server listens on **stdin/stdout** (MCP stdio transport). It starts when a client connects and exits when the client disconnects — no background daemon.
+
+### Check if it's working
+
+In one terminal, start the server:
 
 ```bash
-ctrl-memory-mcp --backend sqlite
+ctrl-memory-mcp
 ```
 
-### Test it
+In another terminal, run:
 
 ```bash
-# Add a fact
-echo '{"jsonrpc":"2.0","id":1,"method":"add_memory","params":{"user_id":"alice","content":"Alice prefers Fastify over Express for Node.js APIs"}}' | ctrl-memory-mcp
+# 1. Initialize the session
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{}}}' | ctrl-memory-mcp
 
-# Search
-echo '{"jsonrpc":"2.0","id":2,"method":"search_memory","params":{"user_id":"alice","query":"what framework does Alice use?"}}' | ctrl-memory-mcp
+# 2. Add a fact
+echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"add_memory","arguments":{"user_id":"alice","content":"Alice prefers Fastify over Express"}}}' | ctrl-memory-mcp
+
+# 3. Search
+echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_memory","arguments":{"user_id":"alice","query":"web framework"}}}' | ctrl-memory-mcp
+```
+
+> 💡 For Hermes users: the plugin activates **automatically** when you start a new conversation. No need to run `ctrl-memory-mcp` separately. Memory is stored per-user across sessions.
+
+---
+
+## 🔄 Updating
+
+```bash
+# If you used the one-liner installer — just re-run it (upgrades in-place):
+curl -fsSL https://raw.githubusercontent.com/ctrlProgrammer/ctrl-memory-system/main/install.sh | bash
+
+# If you used pip:
+pip install --upgrade "ctrl-memory[embeddings]"
+
+# If you used pipx:
+pipx upgrade ctrl-memory
 ```
 
 ---
