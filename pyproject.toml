@@ -1,0 +1,26 @@
+[project]
+name = "ctrl-memory"
+version = "0.3.0"
+description = "Lightweight local-first MCP memory server for LLM agents"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+keywords = ["mcp", "memory", "llm", "agent", "hermes"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Repository = "https://github.com/ctrl-alt-dev/ctrl-memory"
+Issues = "https://github.com/ctrl-alt-dev/ctrl-memory/issues"
+
+[project.scripts]
+ctrl-memory-mcp = "mcp_server:main"
+
+[project.optional-dependencies]
+embeddings = ["sentence-transformers>=3.0.0"]
+
+[tool.pytest]
+testpaths = ["tests"]

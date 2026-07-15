@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.so
+
+# Virtual environments
+.venv/
+venv/
+.venv*/
+venv*/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+.Directory
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.coverage.*
+*.cover
+.hypothesis/
+
+# Project data
+.ctrl-memory/
+*.ctrl-memory.db
+ctrl-memory-bench.db
+
+# Benchmark temp files
+/tmp/ctrl-memory-bench.db
+
+# Build artifacts
+*.whl
+*.tar.gz
+
+# Logs
+*.log

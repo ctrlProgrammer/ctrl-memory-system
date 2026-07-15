@@ -1,0 +1,3 @@
+name: ctrl-memory
+version: 0.2.0
+description: "SQLite-backed memory provider with optional semantic search — private, local-first, cross-agent via shared MCP server."
