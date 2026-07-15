@@ -29,7 +29,21 @@ ctrl-memory-mcp
 
 ## 🚀 Quick start
 
-### Install
+### One-liner install (recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ctrlProgrammer/ctrl-memory-system/main/install.sh | bash
+```
+
+This creates an isolated virtual environment in `~/.local/share/ctrl-memory/`, installs ctrl-memory with semantic search, and makes the `ctrl-memory-mcp` command available globally. No `pip install --user` or `sudo` needed.
+
+After install, open a new terminal (or `exec $SHELL`) and run:
+
+```bash
+ctrl-memory-mcp
+```
+
+### Manual install with pip
 
 ```bash
 # Core (zero deps)
@@ -37,6 +51,19 @@ pip install ctrl-memory
 
 # With semantic search
 pip install "ctrl-memory[embeddings]"
+```
+
+> ⚠️ If your system restricts global pip installs (PEP 668), use the one-liner above or install inside a virtual environment:
+> ```bash
+> python3 -m venv .venv
+> source .venv/bin/activate
+> pip install "ctrl-memory[embeddings]"
+> ```
+
+### pipx (alternative)
+
+```bash
+pipx install "ctrl-memory[embeddings]"
 ```
 
 ### Run the MCP server
