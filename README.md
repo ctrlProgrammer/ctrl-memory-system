@@ -200,17 +200,57 @@ Query
 
 ## 📊 Benchmark results
 
-Tested against **[PrecisionMemBench](https://github.com/tenurehq/precisionMemBench)** — 77 retrieval scenarios across alias resolution, fuzzy matching, scope isolation, noise resistance, and more.
+Tested against **[PrecisionMemBench](https://github.com/tenurehq/precisionMemBench)** — 77 retrieval scenarios across alias resolution, fuzzy matching, scope isolation, noise resistance, supersession chains, and budget constraints.
 
-| Phase | Passing | Improvement |
+### Score: **54 / 77** ✅ (70% passing)
+
+| Phase | Passing | Δ |
 |---|---|---|
 | Base keyword search | 9 / 77 | — |
 | Hybrid keyword + cosine | **42 / 77** | +33 |
-| + Damerau-Levenshtein | **43 / 77** | +1 |
+| + Damerau-Levenshtein fuzzy | **43 / 77** | +1 |
 | + Scope filtering | **49 / 77** | +6 |
 | + Supersession filtering | **54 / 77** | +5 |
 
-**Second-best result** among all tested providers, with zero external dependencies.
+### What passes (54 tests)
+
+| Category | Tests |
+|---|---|
+| **Alias resolution** | k8s → Kubernetes, GHA → GitHub Actions, ReactJS → React, POV → point of view, DLQ → dead letter queue, base class → composition-inheritance, exceptions → error handling, 2-word shingles |
+| **Exact match** | repository-layer, canonical name, long query (400+ chars) |
+| **Scope filtering** | Redis-in-writing returns character not datastore, code-scope doesn't leak writing, cross-scope blocked, user-edited respects scope, scope bleed protection |
+| **Supersession** | SQLAlchemy superseded by MongoDB hidden, TSLint→ESLint→Biome chain resolves to terminal, resolved_at beliefs excluded, pinned+resolved excluded from questions |
+| **Fuzzy matching** | All-caps case-insensitive (REACTJS), typo prefix guard, scope-aware fuzzy filtering |
+| **Messy queries** | Filler-heavy extraction, compound surfaces 2 beliefs, negation still surfaces topic, all-caps case insensitive |
+| **Budget/limits** | Ceiling eviction, zero graceful, one pinned wins, recency tiebreak |
+| **Edge cases** | Cold start, empty query, whitespace query, short query passthrough, short query score clears, empty alias content path |
+| **User isolation** | Other-user beliefs never leak |
+| **Universal scope** | Persona prelude, explicit query with no relevant, zero-reinforcement fresh belief surfaces |
+
+### What fails (23 tests) — root causes
+
+| Cause | Tests | Why |
+|---|---|---|
+| **Token bleeding** | 8 | Generic query tokens match too many facts (e.g. "kube" finds multiple) |
+| **Relation expansion** | 4 | "auth depends on redis" — not yet implemented |
+| **Cap stress** | 3 | 6+ entities in single query needs NLP extraction |
+| **Ranking weights** | 2 | canonical_name should outrank content match |
+| **Multi-scope Redis** | 2 | Redis in both code+writing scopes needs per-scope dedup |
+| **Fuzzy edge cases** | 2 | k9s vs k8s prefix guard, single-edit with token bleed |
+| **Other** | 2 | why_it_matters not indexed, type isolation routing |
+
+### Comparison with other providers
+
+| Provider | Passing | Precision | Dependencies |
+|---|---|---|---|
+| **tenure** (reference) | **77 / 77** | 1.00 | MongoDB Atlas Search (BM25, shingles, fuzzy) |
+| **ctrl-memory** | **54 / 77** | **~0.70** | **Zero external deps** |
+| okf | ~30 / 77 | ~0.47 | PostgreSQL |
+| supermemory | ~21 / 77 | ~0.22 | Supabase + API |
+| yourmemory | ~21 / 77 | ~0.17 | MongoDB |
+| mem0 | ~9 / 77 | ~0.06 | Qdrant + API |
+
+**Second place** among all tested providers. ctrl-memory achieves this with **zero external dependencies** — no databases, no APIs, no cloud services.
 
 ---
 
