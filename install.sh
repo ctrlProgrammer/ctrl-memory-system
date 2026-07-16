@@ -99,7 +99,7 @@ source "$VENV_DIR/bin/activate"
 pip install --quiet --upgrade pip 2>&1 | tail -1 || true
 
 # Determine install mode
-if [ -d "$(dirname "$0")/memory_backend.py" ] || [ -f "$(dirname "$0")/pyproject.toml" ]; then
+if [ -f "$(dirname "$0")/memory_backend.py" ] || [ -f "$(dirname "$0")/pyproject.toml" ]; then
     # Local install (running from project directory)
     INSTALL_SRC="$(dirname "$0")"
     info "Installing from local source: $INSTALL_SRC"

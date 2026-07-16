@@ -5,7 +5,7 @@ Wraps the SQLiteStore backend as a full Hermes MemoryProvider with:
   - Automatic prefetch: relevant facts injected before each turn.
   - Auto-capture: user statements that look like facts are stored.
   - System prompt block: agent knows it has memory.
-  - Tool schemas: the agent can explicitly add/search/delete facts.
+  - Tool schemas: the agent can explicitly add/search/update/delete facts.
 
 Shares the same database file as the MCP server when both use the
 default path (~/.ctrl-memory/memory.db), so facts are consistent
@@ -20,160 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from agent.memory_provider import MemoryProvider
 
-# Attempt to import our backend from the ctrl-memory project.
-# Falls back to a bundled inline copy if import fails (plugin runs standalone).
-try:
-    from ctrl_memory.backend import SQLiteStore, EmbeddingEngine, FactNotFoundError
-except ImportError:
-    # ── Inline minimal backend for standalone plugin deployment ──────
-    import sqlite3
-    import math
-
-    class FactNotFoundError(Exception):
-        pass
-
-    class EmbeddingEngine:
-        def __init__(self, model_name="all-MiniLM-L6-v2"):
-            self._model = None
-            try:
-                from sentence_transformers import SentenceTransformer
-                self._model = SentenceTransformer(model_name)
-            except ImportError:
-                pass
-
-        @property
-        def is_available(self):
-            return self._model is not None
-
-        def embed(self, text: str) -> List[float]:
-            if not self._model:
-                raise RuntimeError("sentence-transformers not installed")
-            return self._model.encode(text, normalize_embeddings=True).tolist()
-
-    class SQLiteStore:
-        def __init__(self, db_path, embedding_engine=None):
-            self._db_path = Path(db_path)
-            self._db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._conn = sqlite3.connect(str(self._db_path))
-            self._conn.row_factory = sqlite3.Row
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("""
-                CREATE TABLE IF NOT EXISTS facts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    tags TEXT DEFAULT '',
-                    created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL
-                )
-            """)
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_user_id ON facts(user_id)")
-            self._conn.execute("""
-                CREATE TABLE IF NOT EXISTS embeddings (
-                    fact_id INTEGER PRIMARY KEY,
-                    vector BLOB NOT NULL,
-                    FOREIGN KEY (fact_id) REFERENCES facts(id) ON DELETE CASCADE
-                )
-            """)
-            self._conn.commit()
-            self._ee = embedding_engine
-
-        def add_fact(self, user_id, content, tags=""):
-            now = time.time()
-            cur = self._conn.execute(
-                "INSERT INTO facts (user_id, content, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                (user_id, content, tags, now, now),
-            )
-            fact_id = cur.lastrowid
-            self._maybe_embed(fact_id, content)
-            self._conn.commit()
-            return {"id": fact_id, "content": content, "tags": tags}
-
-        def get_all_facts(self, user_id):
-            rows = self._conn.execute(
-                "SELECT * FROM facts WHERE user_id = ? ORDER BY updated_at DESC", (user_id,)
-            ).fetchall()
-            return [dict(r) for r in rows]
-
-        def count_facts(self, user_id):
-            row = self._conn.execute(
-                "SELECT COUNT(*) AS cnt FROM facts WHERE user_id = ?", (user_id,)
-            ).fetchone()
-            return row["cnt"]
-
-        def search_facts(self, user_id, query, limit=5):
-            q = query.lower().strip()
-            if not q:
-                return []
-            like = f"%{q}%"
-            rows = self._conn.execute(
-                """SELECT * FROM facts
-                   WHERE user_id = ? AND (LOWER(content) LIKE ? OR LOWER(tags) LIKE ?)
-                   ORDER BY updated_at DESC LIMIT ?""",
-                (user_id, like, like, limit),
-            ).fetchall()
-            return [dict(r) for r in rows]
-
-        def search_facts_semantic(self, user_id, query, limit=5):
-            if not self._ee or not self._ee.is_available:
-                return self.search_facts(user_id, query, limit)
-            q = query.strip()
-            if not q:
-                return []
-            query_vec = self._ee.embed(q)
-            rows = self._conn.execute(
-                """SELECT e.fact_id, e.vector, f.content, f.tags
-                   FROM embeddings e JOIN facts f ON e.fact_id = f.id
-                   WHERE f.user_id = ?""",
-                (user_id,),
-            ).fetchall()
-            import struct
-            scored = []
-            for row in rows:
-                blob = row["vector"]
-                count = len(blob) // 4
-                fact_vec = list(struct.unpack(f"<{count}f", blob))
-                dot = sum(x * y for x, y in zip(query_vec, fact_vec))
-                nq = math.sqrt(sum(x * x for x in query_vec))
-                nf = math.sqrt(sum(x * x for x in fact_vec))
-                score = dot / (nq * nf) if nq and nf else 0.0
-                scored.append({
-                    "id": row["fact_id"], "content": row["content"],
-                    "tags": row["tags"], "score": round(score, 4),
-                })
-            scored.sort(key=lambda x: x["score"], reverse=True)
-            return scored[:limit]
-
-        def delete_fact(self, user_id, fact_id):
-            cur = self._conn.execute(
-                "DELETE FROM facts WHERE user_id = ? AND id = ?", (user_id, fact_id)
-            )
-            self._conn.commit()
-            return cur.rowcount > 0
-
-        def clear_all(self, user_id):
-            self._conn.execute(
-                "DELETE FROM embeddings WHERE fact_id IN (SELECT id FROM facts WHERE user_id = ?)",
-                (user_id,),
-            )
-            self._conn.execute("DELETE FROM facts WHERE user_id = ?", (user_id,))
-            self._conn.commit()
-
-        def _maybe_embed(self, fact_id, content):
-            if not self._ee or not self._ee.is_available:
-                return
-            vec = self._ee.embed(content)
-            import struct
-            blob = struct.pack(f"<{len(vec)}f", *vec)
-            self._conn.execute(
-                "INSERT OR REPLACE INTO embeddings (fact_id, vector) VALUES (?, ?)",
-                (fact_id, blob),
-            )
-
-        def close(self):
-            self._conn.close()
-    # ── End of inline backend ────────────────────────────────────────
-
+from ctrl_memory.backend import SQLiteStore, EmbeddingEngine, FactNotFoundError, _validate_fact_input
 
 log = logging.getLogger(__name__)
 
@@ -202,6 +49,20 @@ SEARCH_MEMORY_SCHEMA = {
             "limit": {"type": "integer", "description": "Max results (default 5)"},
         },
         "required": ["query"],
+    },
+}
+
+UPDATE_MEMORY_SCHEMA = {
+    "name": "ctrl_memory_update",
+    "description": "Update an existing fact's content and/or tags.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "fact_id": {"type": "integer", "description": "The fact's numeric ID"},
+            "content": {"type": "string", "description": "New content text"},
+            "tags": {"type": "string", "description": "New comma-separated tags"},
+        },
+        "required": ["fact_id"],
     },
 }
 
@@ -237,7 +98,7 @@ class CtrlMemoryProvider(MemoryProvider):
     Features:
       - Automatic prefetch: relevant facts injected before each LLM call.
       - Auto-capture: user statements with 'I', 'my', 'we' are saved.
-      - Tools: add, search (keyword + semantic), delete, status.
+      - Tools: add, search (keyword + semantic), update, delete, status.
       - Shares the database with the ctrl-memory MCP server by default.
     """
 
@@ -263,7 +124,7 @@ class CtrlMemoryProvider(MemoryProvider):
         Uses kwargs['hermes_home'] for profile isolation. Falls back to
         ~/.hermes if not provided.
         """
-        hermes_home = Path(kwargs.get("hermes_home", "~/.hermes"))
+        hermes_home = Path(kwargs.get("hermes_home", "~/.hermes")).expanduser()
         db_path = hermes_home / "ctrl-memory" / "memory.db"
 
         # Optionally try to load the embedding engine.
@@ -344,25 +205,44 @@ class CtrlMemoryProvider(MemoryProvider):
         Heuristic: sentences containing first-person markers (I, my, we, our).
         A more sophisticated approach would use LLM extraction, but this is
         zero-cost and catches the common case.
+
+        Deduplication: if the same content text (or a close prefix match)
+        was already auto-captured in the last 60 seconds, skip storage.
         """
         if not self._store or not user_content:
             return
 
         markers = [" i ", " my ", " we ", " our ", " i'm ", " i've ", " i use "]
         text = user_content.lower()
-        if any(m in text for m in markers) or any(
+        if not (any(m in text for m in markers) or any(
             text.startswith(m.strip()) for m in markers
-        ):
-            content = user_content.strip()[:500]
-            self._store.add_fact(
-                self._user_id,
-                content=content,
-                tags="auto-captured",
-            )
+        )):
+            return
+
+        content = user_content.strip()[:500]
+
+        # Deduplication: check if a similar fact was already stored recently.
+        now = time.time()
+        recent = self._store.search_facts(self._user_id, content, limit=3)
+        for fact in recent:
+            if fact.get("tags") == "auto-captured" and (
+                fact["content"] == content
+                or content.startswith(fact["content"])
+                or fact["content"].startswith(content)
+            ):
+                if now - fact.get("created_at", 0) < 60:
+                    return  # Already captured within the last minute
+
+        self._store.add_fact(
+            self._user_id,
+            content=content,
+            tags="auto-captured",
+        )
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
         """Return tool schemas the agent can call."""
-        return [ADD_MEMORY_SCHEMA, SEARCH_MEMORY_SCHEMA, DELETE_MEMORY_SCHEMA, STATUS_SCHEMA]
+        return [ADD_MEMORY_SCHEMA, SEARCH_MEMORY_SCHEMA, UPDATE_MEMORY_SCHEMA,
+                DELETE_MEMORY_SCHEMA, STATUS_SCHEMA]
 
     def handle_tool_call(self, tool_name: str, args: dict, **kwargs) -> str:
         """Dispatch a tool call to the store backend."""
@@ -387,6 +267,19 @@ class CtrlMemoryProvider(MemoryProvider):
             if not results:
                 results = self._store.search_facts(self._user_id, query, limit=limit)
             return json.dumps({"results": results, "count": len(results)})
+
+        if tool_name == "ctrl_memory_update":
+            fact_id = int(args["fact_id"])
+            content = args.get("content")
+            tags = args.get("tags")
+            try:
+                record = self._store.update_fact(
+                    self._user_id, fact_id,
+                    content=content, tags=tags,
+                )
+                return json.dumps({"fact_id": record["id"], "status": "updated"})
+            except FactNotFoundError as e:
+                return json.dumps({"error": str(e)})
 
         if tool_name == "ctrl_memory_delete":
             ok = self._store.delete_fact(

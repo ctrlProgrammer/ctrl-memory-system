@@ -193,11 +193,7 @@ def reset_all():
     """Clear all memories for all users. Called once before seeding."""
     global _seed_lookup
     s = get_store()
-    # Get all distinct user_ids and clear each.
-    rows = s._conn.execute("SELECT DISTINCT user_id FROM facts").fetchall()
-    for row in rows:
-        s.clear_all(row["user_id"])
-    # Also vacuum to reclaim space.
+    s.clear_all_users()
     s._conn.execute("VACUUM")
     # Load seed JSON to build supersession lookup.
     seed_path = Path("/tmp/precisionMemBench/fixtures/beliefs.seed.json")
@@ -214,9 +210,17 @@ def reset_all():
 def health():
     """Quick health check for the benchmark harness."""
     s = get_store()
+    # Detect semantic search: attempt one fact, check for score in results.
+    has_semantic = False
+    try:
+        results = s.search_facts_semantic("benchmark", "health", limit=1)
+        if results and results[0].get("score", 0.0) != 0.0:
+            has_semantic = True
+    except Exception:
+        pass
     return {
         "status": "ok",
-        "semantic_search": s._ee is not None and s._ee.is_available,
+        "semantic_search": has_semantic,
     }
 
 

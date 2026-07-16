@@ -15,12 +15,27 @@ KISS principle:
 """
 
 import json
+import logging
 import math
 import sqlite3
 import struct
 import time
 from pathlib import Path
 from typing import List, Optional
+
+log = logging.getLogger(__name__)
+
+
+# ── Input validation ──────────────────────────────────────────────────────
+
+def _validate_fact_input(content: str, tags: str) -> None:
+    """Validate content and tags; raise ValueError on violation."""
+    if not content or not content.strip():
+        raise ValueError("content must be a non-empty string")
+    if len(content) > 100_000:
+        raise ValueError(f"content too long ({len(content)} chars, max 100_000)")
+    if len(tags) > 10_000:
+        raise ValueError(f"tags too long ({len(tags)} chars, max 10_000)")
 
 
 # ── Constants ────────────────────────────────────────────────────────────
@@ -64,17 +79,24 @@ class EmbeddingEngine:
         """
         self._model = None
         self._model_name = model_name
-        self._dimension = 384  # all-MiniLM-L6-v2 output size
+        self._dimension = 384  # fallback if model fails to load
         self._load_model()
+        # If the model loaded, read the actual dimension from it.
+        if self._model is not None:
+            try:
+                self._dimension = self._model.get_sentence_embedding_dimension()
+            except Exception:
+                pass  # keep the fallback
 
     def _load_model(self) -> None:
-        """Try loading the model; silently set available=False on failure."""
+        """Try loading the model; log on failure."""
         try:
             from sentence_transformers import SentenceTransformer
             self._model = SentenceTransformer(self._model_name)
         except ImportError:
             self._model = None
-        except Exception:
+        except Exception as exc:
+            log.warning("Failed to load embedding model '%s': %s", self._model_name, exc)
             self._model = None
 
     @property
@@ -285,6 +307,11 @@ class MemoryStore:
     """
     A JSON-file-based fact store. One JSON file per user.
 
+    **Concurrency note:** This backend is NOT safe for concurrent access from
+    multiple processes. It reads, mutates, and rewrites the entire file per
+    operation with no file locking. For concurrent-safe storage, use
+    SQLiteStore instead.
+
     Each fact is a dict with:
       - id (int):         Auto-incrementing identifier, unique per user.
       - content (str):    The fact text to remember.
@@ -309,6 +336,10 @@ class MemoryStore:
         self._dir.mkdir(parents=True, exist_ok=True)
 
     # ── Private helpers ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _validate_input(content: str, tags: str) -> None:
+        _validate_fact_input(content, tags)
 
     def _path_for(self, user_id: str) -> Path:
         """
@@ -382,6 +413,7 @@ class MemoryStore:
         Returns:
             The newly created fact record dict.
         """
+        self._validate_input(content, tags)
         facts = self._load(user_id)
         now = time.time()
         record = {
@@ -491,18 +523,20 @@ class MemoryStore:
             return []
 
         facts = self._load(user_id)
-        results = []
-        for f in facts:
-            content_lower = f["content"].lower()
-            tags_lower = f["tags"].lower()
-            # Match if ANY meaningful token appears.
-            for token in tokens:
-                if token in content_lower or token in tags_lower:
-                    results.append(f)
-                    break
 
-        results.sort(key=lambda x: (x["updated_at"], x["created_at"]), reverse=True)
-        return results[:limit]
+        def _match_count(f: dict) -> int:
+            """Number of query tokens found in content or tags."""
+            text = f"{f['content'].lower()} {f['tags'].lower()}"
+            return sum(1 for t in tokens if t in text)
+
+        scored = [(f, _match_count(f)) for f in facts]
+        scored = [(f, n) for f, n in scored if n > 0]
+        if not scored:
+            return []
+
+        # Sort by match count (desc), then recency (desc).
+        scored.sort(key=lambda x: (-x[1], -x[0]["updated_at"], -x[0]["created_at"]))
+        return [f for f, _ in scored[:limit]]
 
     # ── CRUD: Update ─────────────────────────────────────────────────────
 
@@ -630,6 +664,13 @@ class SQLiteStore:
         self._ee = embedding_engine
         self._init_tables()
 
+    def __del__(self) -> None:
+        """Ensure the database connection is closed on garbage collection."""
+        try:
+            self.close()
+        except Exception:
+            pass
+
     def _init_tables(self) -> None:
         """
         Create the facts and embeddings tables if they don't exist.
@@ -680,6 +721,7 @@ class SQLiteStore:
         Returns:
             The newly created fact record dict.
         """
+        _validate_fact_input(content, tags)
         now = time.time()
         cur = self._conn.execute(
             """INSERT INTO facts (user_id, content, tags, created_at, updated_at)
@@ -1063,4 +1105,25 @@ class SQLiteStore:
             (user_id,),
         )
         self._conn.execute("DELETE FROM facts WHERE user_id = ?", (user_id,))
+        self._conn.commit()
+
+    def close(self) -> None:
+        """Close the database connection, checkpointing WAL."""
+        try:
+            self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception:
+            pass
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+
+    def clear_all_users(self) -> None:
+        """Delete ALL facts and embeddings for ALL users.
+
+        This is intended for benchmark/utility use. For routine per-user
+        cleanup, use clear_all(user_id) instead.
+        """
+        self._conn.execute("DELETE FROM embeddings")
+        self._conn.execute("DELETE FROM facts")
         self._conn.commit()

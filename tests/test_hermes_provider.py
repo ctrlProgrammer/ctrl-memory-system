@@ -54,11 +54,27 @@ class MockMemoryProvider:
         pass
 
 
-# Patch the import so the plugin can be loaded.
-import sys
-if "agent.memory_provider" not in sys.modules:
-    sys.modules["agent.memory_provider"] = MagicMock()
-    sys.modules["agent.memory_provider"].MemoryProvider = MockMemoryProvider
+# Patch agent.memory_provider so the plugin can import CtrlMemoryProvider.
+# We scope the patch to setUpModule/tearDownModule so it doesn't leak into
+# other test files that may be run in the same process.
+_orig_modules: dict = {}
+
+
+def setUpModule():
+    global _orig_modules
+    if "agent.memory_provider" in __import__("sys").modules:
+        _orig_modules["agent.memory_provider"] = __import__("sys").modules["agent.memory_provider"]
+    mock_mod = MagicMock()
+    mock_mod.MemoryProvider = MockMemoryProvider
+    __import__("sys").modules["agent.memory_provider"] = mock_mod
+
+
+def tearDownModule():
+    if "agent.memory_provider" in _orig_modules:
+        __import__("sys").modules["agent.memory_provider"] = _orig_modules["agent.memory_provider"]
+    else:
+        __import__("sys").modules.pop("agent.memory_provider", None)
+
 
 # Now we can import the plugin.
 from hermes_provider import CtrlMemoryProvider, ADD_MEMORY_SCHEMA, SEARCH_MEMORY_SCHEMA
@@ -137,7 +153,8 @@ class TestCtrlMemoryToolSchemas(unittest.TestCase):
         schemas = self.provider.get_tool_schemas()
         names = [s["name"] for s in schemas]
         for expected in ["ctrl_memory_add", "ctrl_memory_search",
-                         "ctrl_memory_delete", "ctrl_memory_status"]:
+                         "ctrl_memory_update", "ctrl_memory_delete",
+                         "ctrl_memory_status"]:
             with self.subTest(tool=expected):
                 self.assertIn(expected, names)
 
@@ -179,6 +196,21 @@ class TestCtrlMemoryToolCalls(unittest.TestCase):
         data = json.loads(result)
         self.assertGreater(data["count"], 0)
         self.assertIn("Searchable", data["results"][0]["content"])
+
+    def test_update_tool_updates_fact(self):
+        """ctrl_memory_update modifies an existing fact."""
+        fact = self.provider._store.add_fact("tool_user", "Original text", tags="old")
+        result = self.provider.handle_tool_call(
+            "ctrl_memory_update",
+            {"fact_id": fact["id"], "content": "Updated text", "tags": "new"},
+        )
+        data = json.loads(result)
+        self.assertEqual(data["status"], "updated")
+        self.assertEqual(data["fact_id"], fact["id"])
+        # Verify the update persisted.
+        updated = self.provider._store.get_fact("tool_user", fact["id"])
+        self.assertEqual(updated["content"], "Updated text")
+        self.assertEqual(updated["tags"], "new")
 
     def test_delete_tool_removes_fact(self):
         """ctrl_memory_delete removes a fact by ID."""
@@ -314,6 +346,21 @@ class TestCtrlMemorySyncTurn(unittest.TestCase):
             session_id="test-session",
         )
         self.assertEqual(self.provider._store.count_facts("sync_user"), 0)
+
+    def test_sync_turn_deduplicates_near_duplicates(self):
+        """Rapid repeated auto-captures of the same content are deduplicated."""
+        self.provider.sync_turn(
+            user_content="I like Python",
+            assistant_content="Cool!",
+            session_id="test-session",
+        )
+        self.provider.sync_turn(
+            user_content="I like Python",
+            assistant_content="Cool!",
+            session_id="test-session",
+        )
+        facts = self.provider._store.get_all_facts("sync_user")
+        self.assertEqual(len(facts), 1, "Should not store duplicate auto-captures")
 
 
 if __name__ == "__main__":

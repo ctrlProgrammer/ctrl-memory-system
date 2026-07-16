@@ -13,6 +13,7 @@ Run with:
 import os
 import tempfile
 import unittest
+from pathlib import Path
 
 from ctrl_memory.backend import MemoryStore, FactNotFoundError
 
@@ -233,15 +234,13 @@ class TestMemoryStore(unittest.TestCase):
 
     def test_default_storage_dir_is_created(self):
         """
-        MemoryStore with default args creates ~/.ctrl-memory/ if needed.
-        We test this indirectly by checking that a store with no args works.
+        MemoryStore creates the storage directory on init if it doesn't exist.
         """
-        # Just ensure the class can be instantiated without errors.
-        store = MemoryStore()
-        self.assertIsNotNone(store)
-        # Clean up the directory we just created.
-        import shutil
-        shutil.rmtree(store._dir, ignore_errors=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            store_dir = Path(tmp) / ".ctrl-memory"
+            store = MemoryStore(storage_dir=str(store_dir))
+            self.assertIsNotNone(store)
+            self.assertTrue(store_dir.is_dir())
 
 
 if __name__ == "__main__":

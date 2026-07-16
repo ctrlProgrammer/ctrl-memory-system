@@ -9,6 +9,7 @@ Protocol: JSON-RPC 2.0 over stdio (one JSON object per line each way).
 """
 
 import json
+import signal
 import sys
 import traceback
 from typing import Any, Callable, Dict
@@ -472,41 +473,54 @@ class MCPMemoryServer:
           5. Flush stdout so the client gets it immediately.
         Stderr captures internal errors without corrupting the protocol stream.
         """
-        while True:
-            line = sys.stdin.readline()
-            if not line:
-                # EOF — stdin closed, shut down cleanly.
-                break
+        # Clean up the store on SIGTERM/SIGINT.
+        def _shutdown(*_args: Any) -> None:
+            if hasattr(self.store, "close"):
+                self.store.close()
+            sys.exit(0)
 
-            line = line.strip()
-            if not line:
-                continue
+        signal.signal(signal.SIGTERM, _shutdown)
+        signal.signal(signal.SIGINT, _shutdown)
 
-            try:
-                request = json.loads(line)
-                response = self.handle_request(request)
-                sys.stdout.write(json.dumps(response) + "\n")
-                sys.stdout.flush()
-            except json.JSONDecodeError as e:
-                # Invalid JSON from the client — return a parse error.
-                error_resp = _error_response(
-                    None,
-                    code=-32700,  # Parse error
-                    message="Invalid JSON",
-                    data=str(e),
-                )
-                sys.stdout.write(json.dumps(error_resp) + "\n")
-                sys.stdout.flush()
-            except Exception as e:
-                # Unexpected error in the handler itself.
-                error_resp = _error_response(
-                    None,
-                    code=-32603,  # Internal error
-                    message="Server error",
-                    data={"error": str(e), "traceback": traceback.format_exc()},
-                )
-                sys.stdout.write(json.dumps(error_resp) + "\n")
-                sys.stdout.flush()
+        try:
+            while True:
+                line = sys.stdin.readline()
+                if not line:
+                    # EOF — stdin closed, shut down cleanly.
+                    break
+
+                line = line.strip()
+                if not line:
+                    continue
+
+                try:
+                    request = json.loads(line)
+                    response = self.handle_request(request)
+                    sys.stdout.write(json.dumps(response) + "\n")
+                    sys.stdout.flush()
+                except json.JSONDecodeError as e:
+                    # Invalid JSON from the client — return a parse error.
+                    error_resp = _error_response(
+                        None,
+                        code=-32700,  # Parse error
+                        message="Invalid JSON",
+                        data=str(e),
+                    )
+                    sys.stdout.write(json.dumps(error_resp) + "\n")
+                    sys.stdout.flush()
+                except Exception as e:
+                    # Unexpected error in the handler itself.
+                    error_resp = _error_response(
+                        None,
+                        code=-32603,  # Internal error
+                        message="Server error",
+                        data={"error": str(e), "traceback": traceback.format_exc()},
+                    )
+                    sys.stdout.write(json.dumps(error_resp) + "\n")
+                    sys.stdout.flush()
+        finally:
+            if hasattr(self.store, "close"):
+                self.store.close()
 
 
 # ── Entry Point ──────────────────────────────────────────────────────────

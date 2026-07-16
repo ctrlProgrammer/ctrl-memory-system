@@ -271,12 +271,16 @@ class TestSQLiteStoreSemanticSearch(unittest.TestCase):
         self.assertEqual(len(results), 0)
 
     def test_semantic_search_fallback_without_engine(self):
-        """Without an engine, search_facts_semantic returns empty list."""
+        """Without an engine, search_facts_semantic falls back to keyword search."""
         store_no_ee = SQLiteStore(db_path=self.tmp_file)
-        store_no_ee.add_fact(self.user, "Test fact")
-        results = store_no_ee.search_facts_semantic(self.user, "test")
-        self.assertEqual(len(results), 0)
-        store_no_ee._conn.close()
+        try:
+            store_no_ee.add_fact(self.user, "Test fact")
+            results = store_no_ee.search_facts_semantic(self.user, "test")
+            # Falls back to keyword search, should return the fact with score=0.0
+            self.assertGreaterEqual(len(results), 1)
+            self.assertEqual(results[0]["score"], 0.0)
+        finally:
+            store_no_ee.close()
 
     def test_semantic_search_meaning_vs_keyword(self):
         """
